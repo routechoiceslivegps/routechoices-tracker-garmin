@@ -22,7 +22,7 @@ class TrackerModel{
         var jsonSecrets = Application.loadResource(Rez.JsonData.jsonSecrets);
         apiKey = jsonSecrets["apiKey"];
         if (deviceId != null) {
-            System.println("Device ID set" + deviceId);
+            System.println("Device ID set");
         } else {
             System.println("Device ID not set");
             requestDeviceId();
