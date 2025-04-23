@@ -7,3 +7,4 @@ internal-mir/
 mir/
 .DS_Store
 resources/secrets.json
+.vscode/
