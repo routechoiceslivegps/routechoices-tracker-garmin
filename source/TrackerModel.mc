@@ -1,181 +1,132 @@
-using Toybox.Attention;
+import Toybox.Lang;
 using Toybox.Communications;
+using Toybox.Application.Storage;
 using Toybox.Position;
-using Toybox.Sensor;
 using Toybox.System;
 using Toybox.Time;
-using Toybox.Timer;
-using Toybox.WatchUi;
 
 
 class TrackerModel{
-    var SERVER_URL = "https://www.routechoices.com";
-    var buffer;
-    var heartRate;
+    var SERVER_URL = "https://api.routechoices.com";
     var deviceId = null;
-    var isRequestingDeviceId = false;
-    var activityStartTime = null;
-    var lapStartTime = null;
-    var accumulatedTime = 0;
-    var accumulatedLapTime = 0;
-    var isConnected = false;
-    var session = ActivityRecording.createSession({
-        :name=>"Live Tracking",
-        :sport=>ActivityRecording.SPORT_RUNNING,
-        :subSport=>ActivityRecording.SUB_SPORT_TRAIL
-    });
-    const HAS_TONES = Attention has :playTone;
-    const HAS_VIBRATE = Attention has :vibrate;
-
-    hidden var refreshTimer = new Timer.Timer();
-    hidden var sendTimer = new Timer.Timer();
+    var isRequestingDeviceID = false;
+    var positions = {};
+    var isSending = false;
+    var isConnectedTs = 0;
+    var fromIdx = 0;
+    var toIdx = 0;
+    var apiKey = "";
 
     function initialize() {
-        deviceId = Application.getApp().getProperty("deviceId");
-        if (deviceId == null || deviceId == "") {
-            System.println("Device Id not set");
-            requestDeviceId();
+        deviceId = Storage.getValue("device-id");
+        var jsonSecrets = Application.loadResource(Rez.JsonData.jsonSecrets);
+        apiKey = jsonSecrets["apiKey"];
+        if (deviceId != null) {
+            System.println("Device ID set" + deviceId);
         } else {
-            System.println("Device Id set");
+            System.println("Device ID not set");
+            requestDeviceId();
         }
-        buffer = new PositionBuffer();
-        Position.enableLocationEvents(
-            Position.LOCATION_CONTINUOUS,
-            method(:onPosition)
-        );
-        Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE]);
-        Sensor.enableSensorEvents(method(:onSensor));
-        sendTimer.start(method(:sendBuffer), 10000, true);
-        
     }
 
-    function resetDeviceId() {
-        if(isRequestingDeviceId || deviceId == null || deviceId == "") {
-            return ;
-        }
-        setDeviceId(null);
-        requestDeviceId();
-    }
-
-    function requestDeviceId() {
-        if(isRequestingDeviceId) {
-            return ;
-        }
-        System.println("Requesting Device Id");
-        isRequestingDeviceId = true;
-        var url = SERVER_URL + "/api/device_id/";
-        var params = {};
-        var options = {
-            :method => Communications.HTTP_REQUEST_METHOD_POST,
-            :headers => {
-                "Content-Type" => Communications.REQUEST_CONTENT_TYPE_URL_ENCODED
-            },
-            :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
-        };
-        var responseCallback = method(:onDeviceId);
-        Communications.makeWebRequest(url, params, options, responseCallback);
-    }
-
-    function onDeviceId(code, data) {
-        isRequestingDeviceId = false;
-        if (code == 200) {
+    function onDeviceId(code as Number, data as Dictionary?) as Void {
+        isRequestingDeviceID = false;
+        if (code == 200 || code == 201) {
             System.println("Device ID Request Successful.");
-            setDeviceId(data["device_id"]);
+            setDeviceId(data.get("device_id"));
         } else {
             System.println("Device ID Request Failed " + code.toString());
             requestDeviceId();
         }
     }
 
-    function setDeviceId(id) {
-        deviceId = id;
-        Application.getApp().setProperty("deviceId", id);
-        WatchUi.requestUpdate();
+    function requestDeviceId() {
+        if(isRequestingDeviceID) {
+            return ;
+        }
+        System.println("Requesting Device ID");
+        isRequestingDeviceID = true;
+        var url = SERVER_URL + "/device/";
+        var params = null;
+        var options = {
+            :method => Communications.HTTP_REQUEST_METHOD_POST,
+            :headers => {
+                "Content-Type" => Communications.REQUEST_CONTENT_TYPE_JSON,
+                "Accept" => "application/json",
+                "Authorization" => "Bearer " + apiKey
+            },
+            :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
+        };
+        Communications.makeWebRequest(url, params, options, method(:onDeviceId));
     }
 
-    function startActivity() {
-        if(session.isRecording()){
+    function setDeviceId(id) {
+        if (id == null or id == "") {
             return;
         }
-        session.start();
-        activityStartTime = Time.now().value();
-        if (lapStartTime) {
-            lapStartTime = Time.now().value();
-        }
-        WatchUi.requestUpdate();
-        refreshTimer.start(method(:refresh), 100, true);
-        startStopBuzz();
+        deviceId = id;
+        Storage.setValue("device-id", id);
     }
-
-    function stopActivity() {
-        if (session.isRecording()) {
-            accumulatedTime += Time.now().value() - activityStartTime;
-            if (lapStartTime) {
-                accumulatedLapTime += Time.now().value() - lapStartTime;
-            }
-            session.stop();
-            startStopBuzz();
-        }
-    }
-
-    function startStopBuzz(){
-        var foo = HAS_TONES && beep(Attention.TONE_LOUD_BEEP);
-        var bar = HAS_VIBRATE && vibrate(1500);
-    }
-
-    function vibrate(duration){
-        var vibrateData = [ new Attention.VibeProfile(  100, duration ) ];
-        Attention.vibrate( vibrateData );
-        return true;
-    }
-
-    function beep(tone){
-        Attention.playTone(tone);
-        return true;
-    }
-
-    function refresh() {
-        isConnected = buffer.isConnected;
-        WatchUi.requestUpdate();
-    }
-
 
     function onPosition(info) {
-        buffer.addPosition(Time.now().value(), info);
-        isConnected = buffer.isConnected;
+        if (info.currentLocation) {
+            positions.put(positions.size(), [Time.now().value(), info.currentLocation.toDegrees()]);
+        }
     }
 
+    function onSent(code as Number, data as Dictionary?) as Void {
+        isSending = false;
+        if(code == 200 || code == 201) {
+            isConnectedTs = Time.now().value();
+            var vals = positions.values();
+            var newPositions = {};
+            for (var i = 0; i < vals.size(); i++) {
+                if (i < fromIdx || i >= toIdx) {
+                    newPositions.put(newPositions.size(), vals[i]);
+                }
+            }
+            positions = newPositions;
+            if (fromIdx > 0) {
+                sendBuffer();
+            }
+        }
+    }
+    
     function sendBuffer() {
-        if (deviceId != null && deviceId != "") {
-            buffer.send(deviceId);
+        if(deviceId == null || isSending || positions.size() == 0) {
+            return;
         }
-        isConnected = buffer.isConnected;
-    }
-
-    function onSensor(sensorInfo) {
-       heartRate = sensorInfo.heartRate;
-    }
-
-    function addLap() {
-        if (session.isRecording()){
-            session.addLap();
-            accumulatedLapTime = 0;
-            lapStartTime = Time.now().value();
-            startStopBuzz();
+        isSending = true;
+        var t = "";
+        var lat = "";
+        var lon = "";
+        toIdx = positions.size();
+        fromIdx = toIdx - 5;
+        if (fromIdx < 0) {
+            fromIdx = 0;
         }
-    }
-
-    function onQuit(){
-        if (accumulatedTime != 0) {
-            session.save();
-            session = null;
+        for (var i = fromIdx; i < toIdx; i++) {
+            t += positions[i][0].toString() + ",";
+            lat += positions[i][1][0].toString() + ",";
+            lon += positions[i][1][1].toString() + ",";
         }
-        refreshTimer.stop();
-        sendTimer.stop();
-        Position.enableLocationEvents(
-            Position.LOCATION_DISABLE,
-            method(:onPosition)
-        );
-        Sensor.setEnabledSensors([]);
+        var params = {
+            "device_id" => deviceId,
+            "timestamps" => t,
+            "latitudes" => lat,
+            "longitudes" => lon,
+        };
+        var url = SERVER_URL + "/locations/";
+        var options = {
+            :method => Communications.HTTP_REQUEST_METHOD_POST,
+            :headers => {
+                "Content-Type" => Communications.REQUEST_CONTENT_TYPE_JSON,
+                "Accept" => "application/json",
+                "Authorization" => "Bearer " + apiKey
+            },
+            :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
+        };
+        var responseCallback = method(:onSent);
+        Communications.makeWebRequest(url, params, options, responseCallback);
     }
 }

@@ -1,5 +1,0 @@
-<resources>
-  <properties>
-    <property id="deviceID" type="string"></property>
-  </properties>
-</resources>
