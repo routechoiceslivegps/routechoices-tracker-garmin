@@ -72,6 +72,16 @@ class TrackerModel{
         if (info.currentLocation) {
             positions.put(positions.size(), [Time.now().value(), info.currentLocation.toDegrees()]);
         }
+        // Never keep more than 6 minutes worth of data to avoid memory issues
+        if (positions.size() > 360) {
+            var vals = positions.values();
+            var newPositions = {};
+            var sliceStart = vals.size() - 300;
+            for (var i = 0; i < 300; i++) {
+                newPositions.put(newPositions.size(), vals[sliceStart + i]);
+            }
+            positions = newPositions;
+        }
     }
 
     function onSent(code as Number, data as Dictionary?) as Void {
