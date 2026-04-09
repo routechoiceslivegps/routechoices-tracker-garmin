@@ -1,6 +1,6 @@
-import Toybox.Application;
 import Toybox.Lang;
 import Toybox.WatchUi;
+using Toybox.Application;
 
 class rctrackerApp extends Application.AppBase {
 

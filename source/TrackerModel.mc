@@ -7,20 +7,18 @@ using Toybox.Time;
 
 
 class TrackerModel{
+    var API_KEY = "";
     var SERVER_URL = "https://api.routechoices.com";
     var deviceId = null;
+    var lastConnectedTs = 0;
     var isRequestingDeviceID = false;
+    var isSendingData = false;
     var positions = {};
-    var isSending = false;
-    var isConnectedTs = 0;
-    var fromIdx = 0;
-    var toIdx = 0;
-    var apiKey = "";
 
     function initialize() {
         deviceId = Storage.getValue("device-id");
-        var jsonSecrets = Application.loadResource(Rez.JsonData.jsonSecrets);
-        apiKey = jsonSecrets["apiKey"];
+        var jsonSecrets = Application.loadResource(Rez.JsonData.jsonSecrets) as Dictionary;
+        API_KEY = jsonSecrets["apiKey"];
         if (deviceId != null) {
             System.println("Device ID set");
         } else {
@@ -53,7 +51,7 @@ class TrackerModel{
             :headers => {
                 "Content-Type" => Communications.REQUEST_CONTENT_TYPE_JSON,
                 "Accept" => "application/json",
-                "Authorization" => "Bearer " + apiKey
+                "Authorization" => "Bearer " + API_KEY
             },
             :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
         };
@@ -70,56 +68,56 @@ class TrackerModel{
 
     function onPosition(info) {
         if (info.currentLocation) {
-            positions.put(positions.size(), [Time.now().value(), info.currentLocation.toDegrees()]);
+            positions.put(Time.now().value(), info.currentLocation.toDegrees());
         }
         // Never keep more than 6 minutes worth of data to avoid memory issues
-        if (positions.size() > 360) {
-            var vals = positions.values();
-            var newPositions = {};
-            var sliceStart = vals.size() - 300;
-            for (var i = 0; i < 300; i++) {
-                newPositions.put(newPositions.size(), vals[sliceStart + i]);
+        var positionCount = positions.size();
+        if (positionCount > 360) {
+            var timestamps = positions.keys();
+            timestamps.sort(null);
+            var oldTimestamps = (timestamps as Array).slice(0, positionCount - 300);
+            for (var i = 0; i < oldTimestamps.size(); i++) {
+                var ts = oldTimestamps[i];
+                positions.remove(ts);
             }
-            positions = newPositions;
         }
     }
 
-    function onSent(code as Number, data as Dictionary?) as Void {
-        isSending = false;
+    function onSent(code as Number, data as Dictionary?, tsSent as Array) as Void {
+        isSendingData = false;
         if(code == 200 || code == 201) {
-            isConnectedTs = Time.now().value();
-            var vals = positions.values();
-            var newPositions = {};
-            for (var i = 0; i < vals.size(); i++) {
-                if (i < fromIdx || i >= toIdx) {
-                    newPositions.put(newPositions.size(), vals[i]);
-                }
+            lastConnectedTs = Time.now().value();
+            for (var i = 0; i < tsSent.size(); i++) {
+                var ts = (tsSent as Array)[i];
+                positions.remove(ts);
             }
-            positions = newPositions;
-            if (fromIdx > 0) {
-                sendBuffer();
-            }
+        }
+        if (positions.size() > 0) {
+            sendBuffer();
         }
     }
     
     function sendBuffer() {
-        if(deviceId == null || isSending || positions.size() == 0) {
+        if(deviceId == null || isSendingData || positions.size() == 0) {
             return;
         }
-        isSending = true;
+        isSendingData = true;
+        
         var t = "";
         var lat = "";
         var lon = "";
-        toIdx = positions.size();
-        fromIdx = toIdx - 5;
-        if (fromIdx < 0) {
-            fromIdx = 0;
+
+        var timestamps = positions.keys() as Array;
+        timestamps.sort(null);
+        var tsSent = timestamps.slice(-15, null);
+        for (var i = 0; i < tsSent.size(); i++) {
+            var ts = tsSent[i];
+            var coords = positions.get(ts) as Array;
+            t += ts.toString() + ",";
+            lat += coords[0].toString() + ",";
+            lon += coords[1].toString() + ",";
         }
-        for (var i = fromIdx; i < toIdx; i++) {
-            t += positions[i][0].toString() + ",";
-            lat += positions[i][1][0].toString() + ",";
-            lon += positions[i][1][1].toString() + ",";
-        }
+
         var params = {
             "device_id" => deviceId,
             "timestamps" => t,
@@ -132,9 +130,10 @@ class TrackerModel{
             :headers => {
                 "Content-Type" => Communications.REQUEST_CONTENT_TYPE_JSON,
                 "Accept" => "application/json",
-                "Authorization" => "Bearer " + apiKey
+                "Authorization" => "Bearer " + API_KEY
             },
-            :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
+            :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON,
+            :context => tsSent,
         };
         var responseCallback = method(:onSent);
         Communications.makeWebRequest(url, params, options, responseCallback);
