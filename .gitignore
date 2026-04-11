@@ -1,6 +1,7 @@
 developer_key.der
 developer_key.pem
 routechoicestrackergarmin.*
+routechoices-tracker-garmin.*
 bin/
 gen/
 internal-mir/
