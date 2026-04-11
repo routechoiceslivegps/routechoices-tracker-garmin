@@ -91,9 +91,9 @@ class TrackerModel{
                 var ts = (tsSent as Array)[i];
                 positions.remove(ts);
             }
-        }
-        if (positions.size() > 0) {
-            sendBuffer();
+            if (positions.size() > 0) {
+                sendBuffer();
+            }
         }
     }
     
