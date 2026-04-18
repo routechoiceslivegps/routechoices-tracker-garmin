@@ -16,14 +16,15 @@ class TrackerModel{
     var positions = {};
 
     function initialize() {
-        deviceId = Storage.getValue("device-id");
         var jsonSecrets = Application.loadResource(Rez.JsonData.jsonSecrets) as Dictionary;
         API_KEY = jsonSecrets["apiKey"];
-        if (deviceId != null) {
-            System.println("Device ID set");
-        } else {
+        var storedDeviceId = Storage.getValue("device-id");
+        if (storedDeviceId == null || storedDeviceId == "") {
             System.println("Device ID not set");
             requestDeviceId();
+        } else {
+            setDeviceId(storedDeviceId);
+            System.println("Device ID set");
         }
     }
 
@@ -42,8 +43,8 @@ class TrackerModel{
         if(isRequestingDeviceID) {
             return ;
         }
-        System.println("Requesting Device ID");
         isRequestingDeviceID = true;
+        System.println("Requesting Device ID");
         var url = SERVER_URL + "/device/";
         var params = null;
         var options = {
