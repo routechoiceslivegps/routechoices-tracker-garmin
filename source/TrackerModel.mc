@@ -11,9 +11,12 @@ class TrackerModel{
     var SERVER_URL = "https://api.routechoices.com";
     var deviceId = null;
     var lastConnectedTs = 0;
-    var isRequestingDeviceID = false;
     var isSendingData = false;
     var positions = {};
+    var isRequestingDeviceID = false;
+    var lastRequestTs = 0;
+    var backoffTimeout = 1;
+    var lastErrorCode = null;
 
     function initialize() {
         var jsonSecrets = Application.loadResource(Rez.JsonData.jsonSecrets) as Dictionary;
@@ -30,12 +33,14 @@ class TrackerModel{
 
     function onDeviceId(code as Number, data as Dictionary?) as Void {
         isRequestingDeviceID = false;
+        lastRequestTs = Time.now().value();
         if (code == 200 || code == 201) {
             System.println("Device ID Request Successful.");
             setDeviceId(data.get("device_id"));
         } else {
             System.println("Device ID Request Failed " + code.toString());
-            requestDeviceId();
+            backoffTimeout *= 2;
+            lastErrorCode = code.toString();
         }
     }
 
@@ -57,6 +62,7 @@ class TrackerModel{
             :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
         };
         Communications.makeWebRequest(url, params, options, method(:onDeviceId));
+
     }
 
     function setDeviceId(id) {

@@ -14,7 +14,16 @@ class rctrackerView extends WatchUi.SimpleDataField {
 
     function compute(info as Info) as Numeric or Time.Duration or String or Null {
         if (model.deviceId == null) {
-            return "No Device ID";
+            var timeSinceLastTry = Time.now().value() - model.lastRequestTs;
+            var timeUntilNextTry = model.backoffTimeout - timeSinceLastTry;
+            if (!model.isRequestingDeviceID && timeUntilNextTry <= 0) {
+                model.requestDeviceId();
+            }
+            var errorMsg = model.lastErrorCode == null ? "" : ("E" + model.lastErrorCode + ", ");
+            if (model.isRequestingDeviceID) {
+                return "No Device ID, " + errorMsg + "Waiting for response";
+            }
+            return "No Device ID, " + errorMsg + "Retrying in " + timeUntilNextTry + "s";
         }
         model.onPosition(info);
         var timeSinceLastPush = Time.now().value() - model.lastConnectedTs;
